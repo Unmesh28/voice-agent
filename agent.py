@@ -17,6 +17,12 @@ from conversation_manager import ConversationManager
 
 load_dotenv()
 
+VAD_ACTIVATION_THRESHOLD = 0.65  # Higher = more conservative, less noise pickup
+VAD_MIN_SILENCE_DURATION = 0.8   # Longer silence for phone call environments
+VAD_MIN_SPEECH_DURATION = 0.1    # Minimum speech duration to avoid noise bursts
+VAD_MAX_BUFFERED_SPEECH = 60.0   # Maximum speech buffer duration
+VAD_SAMPLE_RATE = 16000          # Optimal sample rate for phone quality
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -83,7 +89,13 @@ async def entrypoint(ctx: JobContext):
         stt=openai.STT(model="whisper-1"),
         llm=openai.LLM(model="gpt-4o-mini", temperature=0.7),
         tts=openai.TTS(model="tts-1", voice="nova"),
-        vad=silero.VAD.load(),
+        vad=silero.VAD.load(
+            activation_threshold=VAD_ACTIVATION_THRESHOLD,
+            min_silence_duration=VAD_MIN_SILENCE_DURATION,
+            min_speech_duration=VAD_MIN_SPEECH_DURATION,
+            max_buffered_speech=VAD_MAX_BUFFERED_SPEECH,
+            sample_rate=VAD_SAMPLE_RATE
+        ),
     )
 
     @session.on("user_speech_committed")
@@ -94,10 +106,15 @@ async def entrypoint(ctx: JobContext):
             "session_id": session_id,
             "speaker": "candidate",
             "name": candidate_name,
-            "transcript": ev.user_transcript
+            "transcript": ev.user_transcript,
+            "vad_config": {
+                "activation_threshold": VAD_ACTIVATION_THRESHOLD,
+                "min_silence_duration": VAD_MIN_SILENCE_DURATION
+            }
         }
         conversation_logger.info(json.dumps(conversation_data))
         logger.info(f"👤 {candidate_name}: {ev.user_transcript}")
+        logger.info(f"🎙️ VAD detected speech with threshold {VAD_ACTIVATION_THRESHOLD}")
         conversation_manager.advance_conversation_state(session_id, ev.user_transcript)
 
     @session.on("agent_speech_committed") 
