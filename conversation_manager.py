@@ -106,7 +106,9 @@ class ConversationManager:
             except Exception as e:
                 logger.error(f"Failed to load conversation state from Redis: {e}")
         else:
-            return self.conversation_cache.get(session_id, {})
+            cached_state = self.conversation_cache.get(session_id)
+            if cached_state:
+                return cached_state
         
         return self.create_new_conversation_state()
 
