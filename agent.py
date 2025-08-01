@@ -2,9 +2,11 @@
 
 import asyncio
 import logging
+from logging.handlers import RotatingFileHandler
 import os
 import json
 import time
+from datetime import datetime
 from dotenv import load_dotenv
 from typing import Optional
 
@@ -20,6 +22,30 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger("voice-agent")
+
+os.makedirs("logs", exist_ok=True)
+
+conversation_logger = logging.getLogger("conversation")
+conversation_logger.setLevel(logging.INFO)
+conversation_handler = RotatingFileHandler(
+    "logs/conversations.log", 
+    maxBytes=10*1024*1024,  # 10MB
+    backupCount=5
+)
+conversation_handler.setFormatter(logging.Formatter('%(message)s'))
+conversation_logger.addHandler(conversation_handler)
+conversation_logger.propagate = False
+
+latency_logger = logging.getLogger("latency")
+latency_logger.setLevel(logging.INFO)
+latency_handler = RotatingFileHandler(
+    "logs/latency.log",
+    maxBytes=10*1024*1024,  # 10MB
+    backupCount=5
+)
+latency_handler.setFormatter(logging.Formatter('%(message)s'))
+latency_logger.addHandler(latency_handler)
+latency_logger.propagate = False
 
 class InterviewAgent(Agent):
     def __init__(self, candidate_name: str = "there"):
@@ -82,16 +108,44 @@ async def entrypoint(ctx: JobContext):
 
     @session.on("user_speech_committed")
     def on_user_speech(ev):
+        timestamp = datetime.utcnow().isoformat()
+        conversation_data = {
+            "timestamp": timestamp,
+            "session_id": session_id,
+            "speaker": "candidate",
+            "name": candidate_name,
+            "transcript": ev.user_transcript
+        }
+        conversation_logger.info(json.dumps(conversation_data))
         logger.info(f"👤 {candidate_name}: {ev.user_transcript}")
         conversation_manager.advance_conversation_state(session_id, ev.user_transcript)
 
     @session.on("agent_speech_committed") 
     def on_agent_speech(ev):
+        timestamp = datetime.utcnow().isoformat()
+        conversation_data = {
+            "timestamp": timestamp,
+            "session_id": session_id,
+            "speaker": "agent",
+            "name": "Shreya",
+            "transcript": ev.agent_transcript
+        }
+        conversation_logger.info(json.dumps(conversation_data))
         logger.info(f"🗣️ Shreya: {ev.agent_transcript}")
         conversation_manager.add_agent_response(session_id, ev.agent_transcript)
 
     @session.on("agent_speech_interrupted")
     def on_speech_interrupted(ev):
+        timestamp = datetime.utcnow().isoformat()
+        conversation_data = {
+            "timestamp": timestamp,
+            "session_id": session_id,
+            "speaker": "agent",
+            "name": "Shreya",
+            "transcript": ev.agent_transcript,
+            "interrupted": True
+        }
+        conversation_logger.info(json.dumps(conversation_data))
         logger.info(f"⚠️ Agent speech interrupted: {ev.agent_transcript}")
 
     usage_collector = metrics.UsageCollector()
@@ -101,12 +155,44 @@ async def entrypoint(ctx: JobContext):
         metrics.log_metrics(mtrcs)
         usage_collector.collect(mtrcs)
         
+        timestamp = datetime.utcnow().isoformat()
+        
         if hasattr(mtrcs, 'stt_metrics') and mtrcs.stt_metrics:
-            logger.info(f"📊 STT Latency: {mtrcs.stt_metrics.inference_duration:.3f}s")
+            stt_latency = mtrcs.stt_metrics.inference_duration
+            latency_data = {
+                "timestamp": timestamp,
+                "session_id": session_id,
+                "type": "STT",
+                "latency_seconds": round(stt_latency, 3),
+                "model": "whisper-1"
+            }
+            latency_logger.info(json.dumps(latency_data))
+            logger.info(f"📊 STT Latency: {stt_latency:.3f}s")
+            
         if hasattr(mtrcs, 'llm_metrics') and mtrcs.llm_metrics:
-            logger.info(f"📊 LLM Latency: {mtrcs.llm_metrics.inference_duration:.3f}s")
+            llm_latency = mtrcs.llm_metrics.inference_duration
+            latency_data = {
+                "timestamp": timestamp,
+                "session_id": session_id,
+                "type": "LLM",
+                "latency_seconds": round(llm_latency, 3),
+                "model": "gpt-4o-mini"
+            }
+            latency_logger.info(json.dumps(latency_data))
+            logger.info(f"📊 LLM Latency: {llm_latency:.3f}s")
+            
         if hasattr(mtrcs, 'tts_metrics') and mtrcs.tts_metrics:
-            logger.info(f"📊 TTS Latency: {mtrcs.tts_metrics.inference_duration:.3f}s")
+            tts_latency = mtrcs.tts_metrics.inference_duration
+            latency_data = {
+                "timestamp": timestamp,
+                "session_id": session_id,
+                "type": "TTS",
+                "latency_seconds": round(tts_latency, 3),
+                "model": "tts-1",
+                "voice": "nova"
+            }
+            latency_logger.info(json.dumps(latency_data))
+            logger.info(f"📊 TTS Latency: {tts_latency:.3f}s")
 
     async def log_usage():
         summary = usage_collector.get_summary()
@@ -124,12 +210,14 @@ async def entrypoint(ctx: JobContext):
     
     logger.info("✅ Agent session started successfully")
 
-    greeting_prompt = f"Start the conversation fresh. Say exactly: 'Hi, am I speaking with {candidate_name}?' and wait for their response."
-    logger.info(f"📝 Using direct greeting prompt: {greeting_prompt}")
+    logger.info("⏳ Waiting for participant to join...")
+    await asyncio.sleep(2)
+
+    greeting = f"Hi, this is Shreya from Talent Hub. We're a recruitment firm based in Navi Mumbai. Just calling to see if now's a good time to quickly talk about a job opportunity?"
+    logger.info(f"🗣️ Initial greeting: {greeting}")
+    await session.say(greeting)
     
-    await session.generate_reply(instructions=greeting_prompt)
-    
-    logger.info("✅ Initial greeting sent using direct prompt")
+    logger.info("✅ Proactive greeting sent")
 
 def main():
     required_vars = [
