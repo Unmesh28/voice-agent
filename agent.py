@@ -4,16 +4,12 @@ import asyncio
 import logging
 import os
 import json
-import uuid
 from dotenv import load_dotenv
 from typing import Optional
 
 from livekit import agents, rtc
 from livekit.agents import Agent, AgentSession, JobContext, WorkerOptions, RoomInputOptions
 from livekit.plugins import openai, silero, noise_cancellation
-
-from performance_monitor import monitor_performance, performance_monitor
-from conversation_manager import ConversationManager, InterviewState
 
 load_dotenv()
 
@@ -24,33 +20,22 @@ logging.basicConfig(
 logger = logging.getLogger("voice-agent")
 
 class InterviewAgent(Agent):
-    def __init__(self, session_id: str):
-        self.session_id = session_id
-        self.conversation_manager = ConversationManager()
+    def __init__(self, candidate_name: str = "there"):
+        self.candidate_name = candidate_name
         
         system_prompt = (
-            "You are Sarah, a professional recruiter from TalentHub Recruitment. "
-            "Conduct phone interviews politely, naturally, and professionally. "
-            "Speak clearly, ask one question at a time, and follow up where appropriate. "
-            "Your tone should be warm and conversational. "
-            "Avoid robotic replies. Listen actively. Be helpful. "
-            "Follow the interview flow naturally: Greeting → Basic details → Experience/salary → "
-            "Communication check → Pitch role → Next steps. "
-            "Don't rush through questions - let the conversation flow naturally."
+            f"You are Sarah, a warm and professional recruiter from TalentHub Recruitment. "
+            f"You're conducting a phone interview with {candidate_name}. "
+            f"Be conversational, natural, and engaging - like talking to a friend professionally. "
+            f"Keep responses concise (1-2 sentences max). Ask one question at a time. "
+            f"Listen actively and respond naturally to what they say. "
+            f"Flow: Greeting → Ask about their background → Discuss experience → "
+            f"Talk about the role → Next steps. Don't rush - let conversation flow naturally."
         )
         super().__init__(instructions=system_prompt)
 
-    @monitor_performance("llm")
-    async def generate_contextual_response(self, user_input: str, candidate_name: str = "there") -> str:
-        current_prompt = self.conversation_manager.get_current_prompt(self.session_id, candidate_name)
-        
-        full_prompt = f"{current_prompt}\n\nCandidate just said: '{user_input}'\n\nRespond naturally and professionally."
-        
-        return full_prompt
-
 async def entrypoint(ctx: JobContext):
-    session_id = str(uuid.uuid4())
-    logger.info(f"🎧 Agent connected to room: {ctx.room.name}, job: {ctx.job.id}, session: {session_id}")
+    logger.info(f"🎧 Agent connecting to room: {ctx.room.name}")
 
     try:
         metadata = json.loads(ctx.job.metadata or "{}")
@@ -60,115 +45,30 @@ async def entrypoint(ctx: JobContext):
     candidate_name = metadata.get("candidate_name", "there")
     phone_number = metadata.get("phone_number", "")
     
-    logger.info(f"Interview session started for {candidate_name} ({phone_number})")
-
-    @monitor_performance("stt")
-    async def transcribe_audio(audio_frame):
-        return await stt.recognize(audio_frame)
-
-    @monitor_performance("tts") 
-    async def synthesize_speech(text):
-        return await tts.synthesize(text)
-
-    stt = openai.STT(model="whisper-1")
-    llm = openai.LLM(model="gpt-4o-mini", temperature=0.3)
-    tts = openai.TTS(model="tts-1", voice="nova")
-    vad = silero.VAD.load()
-
-    agent = InterviewAgent(session_id)
-    conversation_manager = ConversationManager()
+    logger.info(f"📞 Interview starting for {candidate_name} ({phone_number})")
 
     session = AgentSession(
-        stt=stt,
-        llm=llm, 
-        tts=tts,
-        vad=vad,
+        stt=openai.STT(model="whisper-1"),
+        llm=openai.LLM(model="gpt-4o-mini", temperature=0.7),
+        tts=openai.TTS(model="tts-1", voice="nova"),
+        vad=silero.VAD.load(),
     )
 
     await session.start(
         room=ctx.room,
-        agent=agent,
+        agent=InterviewAgent(candidate_name),
         room_input_options=RoomInputOptions(
             noise_cancellation=noise_cancellation.BVC(),
         ),
     )
     
-    logger.info("✅ Agent session started. Waiting for participant...")
+    logger.info("✅ Agent session started successfully")
 
-    @session.on("participant_connected")
-    def on_participant_connected(participant: rtc.RemoteParticipant):
-        logger.info(f"👤 Participant connected: {participant.identity}")
-
-    @session.on("participant_disconnected") 
-    def on_participant_disconnected(participant: rtc.RemoteParticipant):
-        logger.info(f"👋 Participant disconnected: {participant.identity}")
-
-    async def send_initial_greeting():
-        await asyncio.sleep(2)
-        
-        greeting_prompt = conversation_manager.get_current_prompt(session_id, candidate_name)
-        greeting = f"Hi {candidate_name}, this is Sarah from TalentHub Recruitment. Thanks for joining today. How are you doing?"
-        
-        logger.info(f"🗣️ Agent greeting: {greeting}")
-        conversation_manager.add_agent_response(session_id, greeting)
-        
-        await session.say(greeting)
-
-    async def handle_conversation():
-        try:
-            while session.room.connection_state == rtc.ConnectionState.CONN_CONNECTED:
-                if conversation_manager.is_conversation_complete(session_id):
-                    logger.info("Interview completed successfully")
-                    break
-
-                user_msg = await session.listen()
-                
-                if not user_msg or not user_msg.transcript.strip():
-                    continue
-
-                transcript = user_msg.transcript.strip()
-                logger.info(f"🎙️ Candidate said: {transcript}")
-                
-                conversation_manager.advance_conversation_state(session_id, transcript)
-                
-                contextual_prompt = await agent.generate_contextual_response(transcript, candidate_name)
-                
-                response = await session.generate_reply(
-                    user_input=user_msg,
-                    instructions=contextual_prompt
-                )
-                
-                if response and response.text:
-                    logger.info(f"🗣️ Agent said: {response.text}")
-                    conversation_manager.add_agent_response(session_id, response.text)
-                
-                await asyncio.sleep(0.5)
-
-        except Exception as e:
-            logger.error(f"❌ Conversation error: {e}")
-            raise
-
-    async def monitor_connection():
-        while session.room.connection_state == rtc.ConnectionState.CONN_CONNECTED:
-            await asyncio.sleep(5)
-            logger.debug("Connection still active")
-        
-        logger.warning("🔌 Room connection lost")
-
-    try:
-        await asyncio.gather(
-            send_initial_greeting(),
-            handle_conversation(),
-            monitor_connection()
-        )
-    except Exception as e:
-        logger.error(f"❌ Agent session error: {e}")
-    finally:
-        summary = conversation_manager.get_conversation_summary(session_id)
-        logger.info(f"📊 Interview summary: {summary}")
-        
-        session_metrics = performance_monitor.get_session_metrics(session_id)
-        logger.info(f"⏱️ Performance metrics: {len(session_metrics)} measurements recorded")
+    await session.generate_reply(
+        instructions=f"Greet {candidate_name} warmly and professionally. Say 'Hi {candidate_name}! This is Sarah from TalentHub Recruitment. How are you doing today?' and wait for their response."
+    )
+    
+    logger.info("✅ Initial greeting sent using official LiveKit pattern")
 
 def main():
     required_vars = [
