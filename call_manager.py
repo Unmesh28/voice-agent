@@ -134,7 +134,7 @@ class CloudCallManager:
 def main():
     required_vars = [
         "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET",
-        "TWILIO_SIP_TRUNK_ID", "OPENAI_API_KEY", "TWILIO_SIP_DOMAIN"
+        "TWILIO_SIP_TRUNK_ID", "GROQ_API_KEY", "TWILIO_SIP_DOMAIN"
     ]
     missing = [v for v in required_vars if not os.getenv(v)]
     if missing:

@@ -60,8 +60,8 @@ LIVEKIT_AGENT_NAME=recruiter-agent
 TWILIO_SIP_DOMAIN=your-sip-domain
 TWILIO_SIP_TRUNK_ID=your-trunk-id
 
-# OpenAI Configuration
-OPENAI_API_KEY=your-openai-key
+# Groq Configuration
+GROQ_API_KEY=your-groq-key
 
 # Redis Configuration (Optional)
 REDIS_HOST=localhost

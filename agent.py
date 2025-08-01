@@ -12,7 +12,7 @@ from typing import Optional
 
 from livekit import agents, rtc
 from livekit.agents import Agent, AgentSession, JobContext, WorkerOptions, RoomInputOptions, metrics
-from livekit.plugins import openai, silero, noise_cancellation
+from livekit.plugins import groq, silero, noise_cancellation
 from conversation_manager import ConversationManager
 
 load_dotenv()
@@ -86,9 +86,15 @@ async def entrypoint(ctx: JobContext):
     conversation_manager = ConversationManager()
     
     session = AgentSession(
-        stt=openai.STT(model="whisper-1"),
-        llm=openai.LLM(model="gpt-4o-mini", temperature=0.7),
-        tts=openai.TTS(model="tts-1", voice="nova"),
+        stt=groq.STT(
+            model="whisper-large-v3-turbo",
+            language="en",
+        ),
+        llm=groq.LLM(model="llama3-8b-8192", temperature=0.7),
+        tts=groq.TTS(
+            model="playai-tts",
+            voice="Arista-PlayAI",
+        ),
         vad=silero.VAD.load(
             activation_threshold=VAD_ACTIVATION_THRESHOLD,
             min_silence_duration=VAD_MIN_SILENCE_DURATION,
@@ -161,7 +167,7 @@ async def entrypoint(ctx: JobContext):
                 "session_id": session_id,
                 "type": "STT",
                 "latency_seconds": round(stt_latency, 3),
-                "model": "whisper-1"
+                "model": "whisper-large-v3-turbo"
             }
             latency_logger.info(json.dumps(latency_data))
             logger.info(f"📊 STT Latency: {stt_latency:.3f}s")
@@ -173,7 +179,7 @@ async def entrypoint(ctx: JobContext):
                 "session_id": session_id,
                 "type": "LLM",
                 "latency_seconds": round(llm_latency, 3),
-                "model": "gpt-4o-mini"
+                "model": "llama3-8b-8192"
             }
             latency_logger.info(json.dumps(latency_data))
             logger.info(f"📊 LLM Latency: {llm_latency:.3f}s")
@@ -185,8 +191,8 @@ async def entrypoint(ctx: JobContext):
                 "session_id": session_id,
                 "type": "TTS",
                 "latency_seconds": round(tts_latency, 3),
-                "model": "tts-1",
-                "voice": "nova"
+                "model": "playai-tts",
+                "voice": "Arista-PlayAI"
             }
             latency_logger.info(json.dumps(latency_data))
             logger.info(f"📊 TTS Latency: {tts_latency:.3f}s")
@@ -216,7 +222,7 @@ async def entrypoint(ctx: JobContext):
 
 def main():
     required_vars = [
-        "OPENAI_API_KEY", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "LIVEKIT_URL"
+        "GROQ_API_KEY", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "LIVEKIT_URL"
     ]
     for var in required_vars:
         if not os.getenv(var):
