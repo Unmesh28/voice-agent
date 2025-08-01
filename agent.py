@@ -17,8 +17,8 @@ from conversation_manager import ConversationManager
 
 load_dotenv()
 
-VAD_ACTIVATION_THRESHOLD = 0.65  # Higher = more conservative, less noise pickup
-VAD_MIN_SILENCE_DURATION = 0.8   # Longer silence for phone call environments
+VAD_ACTIVATION_THRESHOLD = 0.55  # Lower = more responsive, faster pickup
+VAD_MIN_SILENCE_DURATION = 0.6   # Shorter silence for faster response
 VAD_MIN_SPEECH_DURATION = 0.1    # Minimum speech duration to avoid noise bursts
 VAD_MAX_BUFFERED_SPEECH = 60.0   # Maximum speech buffer duration
 VAD_SAMPLE_RATE = 16000          # Optimal sample rate for phone quality
@@ -27,7 +27,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger("voice-agent")
+logger = logging.getLogger("optimized-voice-agent")
 
 os.makedirs("logs", exist_ok=True)
 
@@ -97,13 +97,13 @@ async def entrypoint(ctx: JobContext):
         raise
     
     try:
-        logger.info("🔍 ENTRYPOINT: Initializing hybrid services (Groq STT/LLM + OpenAI TTS)...")
+        logger.info("🔍 ENTRYPOINT: Initializing OPTIMIZED hybrid services (Groq STT/LLM + OpenAI TTS)...")
         session = AgentSession(
             stt=groq.STT(
                 model="whisper-large-v3-turbo",
                 language="en",
             ),
-            llm=groq.LLM(model="llama3-8b-8192", temperature=0.7),
+            llm=groq.LLM(model="llama-3.1-8b-instant", temperature=0.6),
             tts=openai.TTS(
                 model="tts-1",
                 voice="nova",
@@ -116,7 +116,7 @@ async def entrypoint(ctx: JobContext):
                 sample_rate=VAD_SAMPLE_RATE
             ),
         )
-        logger.info("✅ ENTRYPOINT: Hybrid services (Groq STT/LLM + OpenAI TTS) and AgentSession initialized successfully")
+        logger.info("✅ ENTRYPOINT: OPTIMIZED hybrid services (Groq STT/LLM + OpenAI TTS) and AgentSession initialized successfully")
     except Exception as e:
         logger.error(f"❌ ENTRYPOINT: Failed to initialize hybrid services: {e}")
         logger.exception("Full traceback:")
@@ -133,12 +133,13 @@ async def entrypoint(ctx: JobContext):
             "transcript": ev.user_transcript,
             "vad_config": {
                 "activation_threshold": VAD_ACTIVATION_THRESHOLD,
-                "min_silence_duration": VAD_MIN_SILENCE_DURATION
+                "min_silence_duration": VAD_MIN_SILENCE_DURATION,
+                "optimization": "faster_response"
             }
         }
         conversation_logger.info(json.dumps(conversation_data))
         logger.info(f"👤 {candidate_name}: {ev.user_transcript}")
-        logger.info(f"🎙️ VAD detected speech with threshold {VAD_ACTIVATION_THRESHOLD}")
+        logger.info(f"🎙️ OPTIMIZED VAD detected speech with threshold {VAD_ACTIVATION_THRESHOLD}")
         conversation_manager.advance_conversation_state(session_id, ev.user_transcript)
 
     @session.on("agent_speech_committed") 
@@ -185,10 +186,11 @@ async def entrypoint(ctx: JobContext):
                 "session_id": session_id,
                 "type": "STT",
                 "latency_seconds": round(stt_latency, 3),
-                "model": "whisper-large-v3-turbo"
+                "model": "whisper-large-v3-turbo",
+                "optimization": "baseline"
             }
             latency_logger.info(json.dumps(latency_data))
-            logger.info(f"📊 STT Latency: {stt_latency:.3f}s")
+            logger.info(f"📊 OPTIMIZED STT Latency: {stt_latency:.3f}s")
             
         if hasattr(mtrcs, 'llm_metrics') and mtrcs.llm_metrics:
             llm_latency = mtrcs.llm_metrics.inference_duration
@@ -197,10 +199,20 @@ async def entrypoint(ctx: JobContext):
                 "session_id": session_id,
                 "type": "LLM",
                 "latency_seconds": round(llm_latency, 3),
-                "model": "llama3-8b-8192"
+                "model": "llama-3.1-8b-instant",
+                "temperature": 0.6,
+                "optimization": "faster_model_lower_temp"
             }
             latency_logger.info(json.dumps(latency_data))
-            logger.info(f"📊 LLM Latency: {llm_latency:.3f}s")
+            logger.info(f"📊 OPTIMIZED LLM Latency: {llm_latency:.3f}s (llama-3.1-8b-instant, temp=0.6)")
+        
+        total_latency = 0
+        if hasattr(mtrcs, 'stt_metrics') and mtrcs.stt_metrics:
+            total_latency += mtrcs.stt_metrics.inference_duration
+        if hasattr(mtrcs, 'llm_metrics') and mtrcs.llm_metrics:
+            total_latency += mtrcs.llm_metrics.inference_duration
+        if hasattr(mtrcs, 'tts_metrics') and mtrcs.tts_metrics:
+            total_latency += mtrcs.tts_metrics.inference_duration
             
         if hasattr(mtrcs, 'tts_metrics') and mtrcs.tts_metrics:
             tts_latency = mtrcs.tts_metrics.inference_duration
@@ -210,10 +222,24 @@ async def entrypoint(ctx: JobContext):
                 "type": "TTS",
                 "latency_seconds": round(tts_latency, 3),
                 "model": "tts-1",
-                "voice": "nova"
+                "voice": "nova",
+                "optimization": "baseline"
             }
             latency_logger.info(json.dumps(latency_data))
-            logger.info(f"📊 TTS Latency: {tts_latency:.3f}s")
+            logger.info(f"📊 OPTIMIZED TTS Latency: {tts_latency:.3f}s")
+        
+        if total_latency > 0:
+            total_latency_data = {
+                "timestamp": timestamp,
+                "session_id": session_id,
+                "type": "TOTAL",
+                "latency_seconds": round(total_latency, 3),
+                "vad_threshold": VAD_ACTIVATION_THRESHOLD,
+                "vad_silence_duration": VAD_MIN_SILENCE_DURATION,
+                "optimization": "full_optimization"
+            }
+            latency_logger.info(json.dumps(total_latency_data))
+            logger.info(f"📊 TOTAL OPTIMIZED Latency: {total_latency:.3f}s")
 
     async def log_usage():
         summary = usage_collector.get_summary()
