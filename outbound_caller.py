@@ -7,7 +7,10 @@ import sys
 import logging
 from datetime import datetime
 from typing import List, Dict, Optional
+from dotenv import load_dotenv
 from call_manager import CloudCallManager
+
+load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
