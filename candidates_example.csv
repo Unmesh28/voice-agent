@@ -1,0 +1,9 @@
+# Example candidates file for batch calling
+# Format: Name, Phone Number
+# Lines starting with # are ignored
+
+John Smith, +1234567890
+Sarah Johnson, +1987654321
+Mike Davis, +1555123456
+Lisa Wilson, +1444987654
+David Brown, +1333456789

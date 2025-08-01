@@ -57,9 +57,11 @@ class CloudCallManager:
 
             if result.returncode == 0:
                 logger.info("Agent dispatched successfully")
+                logger.info(f"Agent dispatch output: {result.stdout}")
                 return True
             else:
                 logger.error(f"Dispatch failed: {result.stderr}")
+                logger.error(f"Dispatch stdout: {result.stdout}")
                 return False
         except Exception as e:
             logger.error(f"Error dispatching agent: {e}")
@@ -102,19 +104,32 @@ class CloudCallManager:
             return False
 
     async def initiate_interview(self, candidate_name: str, phone_number: str, trunk_id: str):
-        logger.info(f"Initiating interview for {candidate_name} at {phone_number}")
+        logger.info(f"Initiating outbound interview call for {candidate_name} at {phone_number}")
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         room_name = f"interview_{candidate_name.lower().replace(' ', '_')}_{timestamp}"
         metadata_json = self.create_call_metadata(candidate_name, phone_number)
 
+        logger.info(f"Creating room: {room_name}")
+        logger.info(f"Metadata: {metadata_json}")
+
         dispatched = self.dispatch_agent_to_room(room_name, metadata_json)
         if not dispatched:
-            logger.error("Agent dispatch failed")
+            logger.error("Agent dispatch failed - cannot proceed with call")
             return False
 
-        await asyncio.sleep(3)
-        return await self.place_sip_call(room_name, candidate_name, phone_number, trunk_id)
+        logger.info("Agent dispatched successfully, waiting before placing call...")
+        await asyncio.sleep(5)
+        
+        call_success = await self.place_sip_call(room_name, candidate_name, phone_number, trunk_id)
+        if call_success:
+            logger.info(f"✅ Outbound call initiated successfully to {candidate_name} ({phone_number})")
+            logger.info(f"Room: {room_name}")
+            logger.info("Agent should join the call automatically and start the interview")
+        else:
+            logger.error(f"❌ Failed to place outbound call to {candidate_name} ({phone_number})")
+        
+        return call_success
 
 def main():
     required_vars = [

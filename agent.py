@@ -9,8 +9,8 @@ from dotenv import load_dotenv
 from typing import Optional
 
 from livekit import agents, rtc
-from livekit.agents import Agent, AgentSession, JobContext, WorkerOptions
-from livekit.plugins import openai, silero
+from livekit.agents import Agent, AgentSession, JobContext, WorkerOptions, RoomInputOptions
+from livekit.plugins import openai, silero, noise_cancellation
 
 from performance_monitor import monitor_performance, performance_monitor
 from conversation_manager import ConversationManager, InterviewState
@@ -85,7 +85,13 @@ async def entrypoint(ctx: JobContext):
         vad=vad,
     )
 
-    await session.start(ctx.room, agent)
+    await session.start(
+        room=ctx.room,
+        agent=agent,
+        room_input_options=RoomInputOptions(
+            noise_cancellation=noise_cancellation.BVC(),
+        ),
+    )
     
     logger.info("✅ Agent session started. Waiting for participant...")
 

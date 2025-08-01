@@ -1,0 +1,22 @@
+[
+  {
+    "name": "John Smith",
+    "phone": "+1234567890"
+  },
+  {
+    "name": "Sarah Johnson", 
+    "phone": "+1987654321"
+  },
+  {
+    "name": "Mike Davis",
+    "phone": "+1555123456"
+  },
+  {
+    "name": "Lisa Wilson",
+    "phone": "+1444987654"
+  },
+  {
+    "name": "David Brown",
+    "phone": "+1333456789"
+  }
+]
