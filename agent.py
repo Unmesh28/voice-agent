@@ -12,7 +12,7 @@ from typing import Optional
 
 from livekit import agents, rtc
 from livekit.agents import Agent, AgentSession, JobContext, WorkerOptions, RoomInputOptions, metrics
-from livekit.plugins import groq, silero, noise_cancellation
+from livekit.plugins import groq, openai, silero, noise_cancellation
 from conversation_manager import ConversationManager
 
 load_dotenv()
@@ -70,11 +70,15 @@ class InterviewAgent(Agent):
         super().__init__(instructions=system_prompt)
 
 async def entrypoint(ctx: JobContext):
-    logger.info(f"🎧 Agent connecting to room: {ctx.room.name}")
+    logger.info(f"🔍 ENTRYPOINT CALLED: Agent connecting to room: {ctx.room.name}")
+    logger.info(f"🔍 ENTRYPOINT: Job ID: {ctx.job.id if hasattr(ctx.job, 'id') else 'unknown'}")
+    logger.info(f"🔍 ENTRYPOINT: Job metadata: {ctx.job.metadata}")
 
     try:
         metadata = json.loads(ctx.job.metadata or "{}")
-    except json.JSONDecodeError:
+        logger.info(f"🔍 ENTRYPOINT: Parsed metadata successfully: {metadata}")
+    except json.JSONDecodeError as e:
+        logger.error(f"❌ ENTRYPOINT: Failed to parse job metadata: {e}")
         metadata = {}
 
     candidate_name = metadata.get("candidate_name", "there")
@@ -83,26 +87,40 @@ async def entrypoint(ctx: JobContext):
     
     logger.info(f"📞 Interview starting for {candidate_name} ({phone_number}) - Session: {session_id}")
 
-    conversation_manager = ConversationManager()
+    try:
+        logger.info("🔍 ENTRYPOINT: Initializing conversation manager...")
+        conversation_manager = ConversationManager()
+        logger.info("✅ ENTRYPOINT: Conversation manager initialized successfully")
+    except Exception as e:
+        logger.error(f"❌ ENTRYPOINT: Failed to initialize conversation manager: {e}")
+        logger.exception("Full traceback:")
+        raise
     
-    session = AgentSession(
-        stt=groq.STT(
-            model="whisper-large-v3-turbo",
-            language="en",
-        ),
-        llm=groq.LLM(model="llama3-8b-8192", temperature=0.7),
-        tts=groq.TTS(
-            model="playai-tts",
-            voice="Arista-PlayAI",
-        ),
-        vad=silero.VAD.load(
-            activation_threshold=VAD_ACTIVATION_THRESHOLD,
-            min_silence_duration=VAD_MIN_SILENCE_DURATION,
-            min_speech_duration=VAD_MIN_SPEECH_DURATION,
-            max_buffered_speech=VAD_MAX_BUFFERED_SPEECH,
-            sample_rate=VAD_SAMPLE_RATE
-        ),
-    )
+    try:
+        logger.info("🔍 ENTRYPOINT: Initializing hybrid services (Groq STT/LLM + OpenAI TTS)...")
+        session = AgentSession(
+            stt=groq.STT(
+                model="whisper-large-v3-turbo",
+                language="en",
+            ),
+            llm=groq.LLM(model="llama3-8b-8192", temperature=0.7),
+            tts=openai.TTS(
+                model="tts-1",
+                voice="nova",
+            ),
+            vad=silero.VAD.load(
+                activation_threshold=VAD_ACTIVATION_THRESHOLD,
+                min_silence_duration=VAD_MIN_SILENCE_DURATION,
+                min_speech_duration=VAD_MIN_SPEECH_DURATION,
+                max_buffered_speech=VAD_MAX_BUFFERED_SPEECH,
+                sample_rate=VAD_SAMPLE_RATE
+            ),
+        )
+        logger.info("✅ ENTRYPOINT: Hybrid services (Groq STT/LLM + OpenAI TTS) and AgentSession initialized successfully")
+    except Exception as e:
+        logger.error(f"❌ ENTRYPOINT: Failed to initialize hybrid services: {e}")
+        logger.exception("Full traceback:")
+        raise
 
     @session.on("user_speech_committed")
     def on_user_speech(ev):
@@ -191,8 +209,8 @@ async def entrypoint(ctx: JobContext):
                 "session_id": session_id,
                 "type": "TTS",
                 "latency_seconds": round(tts_latency, 3),
-                "model": "playai-tts",
-                "voice": "Arista-PlayAI"
+                "model": "tts-1",
+                "voice": "nova"
             }
             latency_logger.info(json.dumps(latency_data))
             logger.info(f"📊 TTS Latency: {tts_latency:.3f}s")
@@ -203,26 +221,36 @@ async def entrypoint(ctx: JobContext):
 
     ctx.add_shutdown_callback(log_usage)
 
-    await session.start(
-        room=ctx.room,
-        agent=InterviewAgent(candidate_name),
-        room_input_options=RoomInputOptions(
-            noise_cancellation=noise_cancellation.BVC(),
-        ),
-    )
-    
-    logger.info("✅ Agent session started successfully")
+    try:
+        logger.info("🔍 ENTRYPOINT: Starting agent session...")
+        await session.start(
+            room=ctx.room,
+            agent=InterviewAgent(candidate_name),
+            room_input_options=RoomInputOptions(
+                noise_cancellation=noise_cancellation.BVC(),
+            ),
+        )
+        logger.info("✅ ENTRYPOINT: Agent session started successfully")
+    except Exception as e:
+        logger.error(f"❌ ENTRYPOINT: Failed to start agent session: {e}")
+        logger.exception("Full traceback:")
+        raise
 
-    greeting_prompt = f"Start the conversation immediately. Say exactly: 'Hi, this is Shreya from Talent Hub. We're a recruitment firm based in Navi Mumbai. Just calling to see if now's a good time to quickly talk about a job opportunity?' and wait for their response."
-    logger.info(f"📝 Using direct greeting prompt: {greeting_prompt}")
-    
-    await session.generate_reply(instructions=greeting_prompt)
-    
-    logger.info("✅ Initial greeting sent using direct prompt")
+    try:
+        greeting_prompt = f"Start the conversation immediately. Say exactly: 'Hi, this is Shreya from Talent Hub. We're a recruitment firm based in Navi Mumbai. Just calling to see if now's a good time to quickly talk about a job opportunity?' and wait for their response."
+        logger.info(f"🔍 ENTRYPOINT: Using direct greeting prompt: {greeting_prompt}")
+        
+        await session.generate_reply(instructions=greeting_prompt)
+        
+        logger.info("✅ ENTRYPOINT: Initial greeting sent using direct prompt")
+    except Exception as e:
+        logger.error(f"❌ ENTRYPOINT: Failed to send initial greeting: {e}")
+        logger.exception("Full traceback:")
+        raise
 
 def main():
     required_vars = [
-        "GROQ_API_KEY", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "LIVEKIT_URL"
+        "GROQ_API_KEY", "OPENAI_API_KEY", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "LIVEKIT_URL"
     ]
     for var in required_vars:
         if not os.getenv(var):
